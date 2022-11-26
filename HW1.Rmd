@@ -117,7 +117,7 @@ basis with 95% CI.
 ```{r}
 reg1 <- lm( w ~ sex, df) 
 reg2 <- lm(lnw ~ sex, df) 
-huxreg(reg1,reg2)
+huxreg('wage' = reg1,'ln wage' = reg2)
 
 ```
 
@@ -156,7 +156,7 @@ ggplot(data = df, aes(x = grade92, y=w, color = sex_factor))+
   stat_summary()+ 
   geom_smooth(method = 'loess') +
   scale_x_continuous(breaks = c(39:46))+
-  labs(x = '', y = '$', title = "Hourly wage", ) +
+  labs(x = '', y = '$', title = "Hourly wage + loess", ) +
   theme_classic()
 ```
 
@@ -169,7 +169,7 @@ Loess method in this case does not seem to be sensible, as the grade variable is
 reg4 <- lm( w ~ sex + grade92, df)
 reg5 <- lm( lnw ~ sex + grade92, df)
 reg6 <- lm_robust(lnw ~ sex + grade92, data = df, se_type = "HC1")
-huxreg(reg4,reg5,reg6)
+huxreg('wage'=reg4,'ln wage'= reg5,'ln wage robust' = reg6)
 ```
 
 
@@ -182,6 +182,7 @@ We can see a greater statistical significance in Bachelor's and Master's degree
 ### Summary
 ```{r}
 reg7 <- lm( grade92 ~ sex, df)
-huxreg(reg2,reg5,reg7,  statistics = c(N = "nobs", R2 = "r.squared"))
+huxreg('ln wage' = reg2, 'ln wage' = reg5, 'grade' = reg7,  statistics = c(N = "nobs", R2 = "r.squared"),error_pos = 'same')
 ```
 Comparing men and women in *Marketing and Sales manager* occupational sector, analysis shows an approximate 30% difference in average salaries, considering a 20-60 work week. The second model introduces the education level, where comparing men and women in the same education level, we get a 26.8 log point difference, which here I will interpret as 27%. 
+Relation between grade and sex is not to be interpreted in this case, since the education level is a factor. 
