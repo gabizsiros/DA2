@@ -1,0 +1,187 @@
+---
+title: "Untitled"
+author: "Zsiros, Gabriella"
+date: "2022-11-26"
+output: pdf_document
+---
+
+### Prep
+
+```{r}
+library(tidyverse)
+library(modelsummary)
+library(stargazer)
+library(fastDummies)
+df <- read.csv('/users/Gabi/Downloads/morg-2014-emp.csv')
+```
+
+#### About the data
+
+Dataset is available at <https://osf.io/g8p9j/> . The purpose of this report is to analyse earnings of men and women in a certain occupational sector.
+
+I calculated the hourly earnings as well as its logarithmic values to help with further analysis.
+
+```{r}
+df <- df %>% 
+  mutate(w = earnwke / uhours) %>%
+  mutate(lnw = log(w)) 
+```
+
+#### Which occupation to choose? 
+I considered that I should have approximately same amount of male data as female, and should have originally more than 500 observations per sex. Based on a short check I have selected the category of *Marketing and sales managers*.
+
+```{r echo= FALSE}
+dummies <- df %>% select(occ2012,sex) %>% dummy_cols(select_columns = 'sex')
+dummies <-  dummies %>% group_by(occ2012) %>%  
+  summarise('Sex1'= sum(sex_1) , 'Sex2' = sum(sex_2), 'ratio' = sum(sex_1)/sum(sex_2))
+
+dummies %>% filter(ratio < 1.1 & ratio > 0.9 & Sex1 > 500)
+```
+
+Removing extreme values 
+
+```{r include=FALSE}
+sort(df$earnwke) %>%  head()
+df <- df[order(df$earnwke),] 
+df <- df[-c(1),]
+df <- df[order(df$X),] 
+```
+
+
+#### How many hours?
+A quick check of the distribution of hours has led me ot narrow it down between 20 and 60 hours per week. 
+
+```{r include = FALSE}
+hist(df$uhours)
+summary(df$uhours)
+```
+
+
+
+```{r}
+
+df <-  df %>% filter(uhours > 20 & uhours < 60) %>% filter(occ2012 == 50)
+df <- df %>%  mutate(df,
+                     sex_factor = factor(df$sex,labels = c('male','female')),
+                     .after = sex)
+df <- df %>% filter(grade92 >38)
+```
+
+
+### Hourly earning of men and women
+
+#### Statistical summary
+
+```{r, echo= F}
+Range <- function(x){max(x, na.rm = T) - min(x, na.rm = T)}
+P5 <- function(x){quantile(x,probs = 0.05)}
+P95 <- function(x){quantile(x,probs = 0.95)}
+```
+
+```{r}
+datasummary (earnwke * sex_factor ~
+               Mean + Median + Min + Max + P5 + P95 + Range,
+             data = df)
+datasummary (w * sex_factor ~
+               Mean + Median + Min + Max + P5 + P95 + Range,
+             data = df)
+```
+
+It is visible in he summary that both the mean and median show difference between the two sexes. 
+
+
+#### Visualizing the wage gap
+
+```{r}
+ggplot(data = df, aes(x = sex_factor, y= w, color = sex_factor))+
+  geom_boxplot() + 
+  scale_x_discrete(limits=rev)+
+  labs(x = '', y = '$', title = "Hourly wage", ) +
+  theme_classic() +
+  theme(legend.position="none")
+```
+
+#### T-test
+
+```{r}
+df50f <- df %>% filter(sex == 2)
+df50m <- df %>% filter(sex == 1)
+t.test(df50m$w,df50f$w, mu = 0)
+```
+
+T test with value 8.5176 shows with a p -value of 2.2e-16 (very close to zero) that there is a significant difference in the average earning between men and women. Men earn 6.25-10.46 \$ more on a weekly
+basis with 95% CI.
+
+#### Linear regression
+
+```{r}
+reg1 <- lm( w ~ sex, df) 
+reg2 <- lm(lnw ~ sex, df) 
+huxreg(reg1,reg2)
+
+```
+
+Applying simple regression analysis shows that women earn $8.5, i.e. 29% less on average on a weekly basis
+
+### Introducing grade variable
+
+#### Scatter plot with regression
+
+```{r message = FALSE}
+ggplot(data = df, aes(x = grade92, y=w, color = sex_factor))+
+  geom_point()+ 
+  geom_smooth(method = 'lm')+
+  labs(x = '', y = '$', title = "Hourly wage", ) +
+  facet_wrap(~sex_factor)+
+  theme_classic() +
+  theme(legend.position="none")
+```
+
+#### Summary plot wuth regression
+
+```{r, warning= FALSE, message = FALSE}
+ggplot(data = df, aes(x = grade92, y=w, color = sex_factor))+
+  stat_summary()+ 
+  scale_x_continuous(breaks = c(39:46))+
+  geom_smooth(method = 'lm') +
+  labs(x = '', y = '$', title = "Hourly wage", ) +
+  xlim(39,46)+
+  theme_classic()
+```
+
+#### Loess 
+
+```{r warning= FALSE, message = FALSE}
+ggplot(data = df, aes(x = grade92, y=w, color = sex_factor))+
+  stat_summary()+ 
+  geom_smooth(method = 'loess') +
+  scale_x_continuous(breaks = c(39:46))+
+  labs(x = '', y = '$', title = "Hourly wage", ) +
+  theme_classic()
+```
+
+Loess method in this case does not seem to be sensible, as the grade variable is a factor, rather than a numerical value.
+
+
+#### Multivariate regression
+
+```{r}
+reg4 <- lm( w ~ sex + grade92, df)
+reg5 <- lm( lnw ~ sex + grade92, df)
+reg6 <- lm_robust(lnw ~ sex + grade92, data = df, se_type = "HC1")
+huxreg(reg4,reg5,reg6)
+```
+
+
+Log-level transformation seems to be a more acrruate model, with lower SE-s, and higher R2. 
+In this case robust SE does not show great decrease of SE, so the seond model (`reg5`) will be used to final summary.  
+
+
+
+We can see a greater statistical significance in Bachelor's and Master's degree
+### Summary
+```{r}
+reg7 <- lm( grade92 ~ sex, df)
+huxreg(reg2,reg5,reg7,  statistics = c(N = "nobs", R2 = "r.squared"))
+```
+Comparing men and women in *Marketing and Sales manager* occupational sector, analysis shows an approximate 30% difference in average salaries, considering a 20-60 work week. The second model introduces the education level, where comparing men and women in the same education level, we get a 26.8 log point difference, which here I will interpret as 27%. 
