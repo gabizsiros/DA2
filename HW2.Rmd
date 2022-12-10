@@ -1,0 +1,183 @@
+---
+title: "HW2"
+author: "Zsiros, Gabriella"
+date: "2022-12-10"
+output: 
+  pdf_document:
+    extra_dependencies: ["float"]
+
+---
+
+```{r setup, echo= FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "")
+```
+
+```{r include = F}
+# Import libraries
+library(tidyverse)
+library(modelsummary)
+library(lspline)
+library(fixest)
+library(dplyr)
+library(mfx)
+library(kableExtra)
+```
+
+## Data selection
+
+```{r}
+
+#loading tables
+features <- read.csv('/users/Gabi/Downloads/hotels-europe_features.csv')
+prices <- read.csv('/users/Gabi/Downloads/hotels-europe_price.csv')
+```
+
+After loading the two data tables, we determine the target city, in this case Budapest.Joining the datatables we get the following structure: 
+
+```{r echo = F}
+features <-  features %>% filter(city_actual == 'Budapest')
+df <- left_join(x= features, y= prices, by = 'hotel_id')
+colnames(df)
+```
+
+Creating a quick overview with plotting, we can see that some extreme values showing up around rating = 1. By rational thinking this seems to be distorted, since people tend to give radically negative reviews after some bad experience that may not always be in proportion with the actual overall impression and is very subjective.
+```{r}
+plot(df$rating)
+df %>% count(df$rating) %>% arrange()
+```
+
+Similar overview on price table shows extreme values above price >6000. 
+```{r}
+plot(df$price)
+#removing extremes and missing values
+df <- df %>% filter(rating>2)
+df <- df %>% filter(price<6000)
+```
+After filtering out the extremes, we can check a summary of the final dataset. (Table 1: Statistical overview)
+```{r}
+datasummary_skim(df %>% dplyr::select(distance, rating, price), 
+                 output = 'kableExtra', title = 'Statistical overview') 
+  
+```
+After that, we introduce a binary variable on high rating (highly_rated), categorizing rating greater or equal than 4 as 1, and 0 if the rating is below. 
+
+```{r}
+df <- df %>%  mutate(df,highly_rated = if_else(rating>=4,1,0))
+head(df) %>%  dplyr::select(hotel_id,stars,rating,price, highly_rated)
+tail(df) %>%  dplyr::select(hotel_id,stars,rating,price, highly_rated)
+```
+
+To make sure that the analyzed variables are not each other's linear expression, we rule out collinearity between the two independent variables. 
+Correlation:
+```{r}
+cor(df$price, df$distance)
+```
+We can see that there is an inverse correlation but they are not completely collinear. 
+
+## Linear probability model
+
+```{r}
+#linear probability highly rate ~ distance + price
+lpm <- feols(highly_rated ~ distance + price, data = df, vcov = 'hetero')
+lpm
+
+df <- df %>% mutate(pred = predict(lpm))
+```
+
+Coefficient shows that hotels in the same price category are 9% less likely to be highly rated (4 or more) with the distance increasing.
+Coefficient for price has a relatively higher SE, and lower significance than the distance variable.
+
+```{r}
+feols(highly_rated ~ distance, df, vcov = 'hetero')
+```
+
+
+```{r}
+#Creating weights for visualization
+weighted <- df %>%
+  group_by(highly_rated) %>%
+  mutate(weight = n())  %>%
+  mutate(weight_2=(weight/1000))
+```
+
+### LPM plot prediction vs actual
+```{r}
+ggplot(weighted) +
+ geom_point(aes(highly_rated, pred, size = weight_2), color = 'red', alpha = 0.2) +
+  geom_line (aes(highly_rated, pred), color = 'navyblue') +
+  labs (x = 'Highly rated', y = 'Linear probability prediction', title = 'Prediction vs actual') +
+  theme_bw()
+```
+
+## Non-linear probability
+
+### Logit
+Logit model:
+```{r}
+logit <- feglm(highly_rated ~ distance + price, data = df, family = binomial(link = 'logit'))
+logit
+
+
+df <- df %>% mutate(pred2 = predict(logit, type = 'response'))
+```
+
+### Probit
+Probit model:
+```{r}
+#probit
+probit <- feglm(highly_rated ~ distance + price, data= df, family = binomial(link = 'probit'))
+probit
+
+df <- df %>% mutate(pred3 = predict(probit, type = 'response'))
+```
+### Marginal differences logit & probit
+
+```{r}
+logit_marg <- logitmfx(highly_rated ~ distance + price, data = df, atmean=FALSE, robust = T )
+print(logit_marg)
+probit_marg <- probitmfx(highly_rated ~ distance + price, data = df, atmean=FALSE, robust = T )
+print(probit_marg)
+```
+
+Coefficient are similar not only to each other, with 9.69% and 9.84% probability of high rating decrease in the same price category when the distance form the city center is decreasing. 
+
+
+
+### Comparing logit and probit
+```{r}
+datasummary(pred2 + pred3 ~min+P25+Median+Mean+P75+Max,df, output = 'kableExtra', title = 'Logit / Probit comparison')
+```
+
+Logit and probit has very similar statistical characteristics. Since the difference is very little, either of these two fits the purpose and can been chosen an nonlinear probability model. (Table 2:Logit / Probit comparison) 
+
+## Summary
+```{r}
+etable(lpm, logit, probit)
+
+```
+
+Since logit and probit are nonlinear, coefficient is harnder ot interpret, as the slope of the function changes depending on the x. 
+however, the marginal difference of them is similar to the linear probability model. Distance v ariable has a high significance in all of the models. Pseudo R2is the highest of the logit model. 
+
+
+Plotting comparison of the three models
+```{r}
+#creating helping table for better visualization with legend and colors
+viz <- df %>% dplyr::select(pred,pred2, pred3) 
+viz <-  viz %>% mutate(pred1 = pred, .after = pred) %>% 
+  rename("LPM" = "pred1","Logit" = "pred2","Probit" ="pred3") %>% 
+  gather(key = "model", value = "value", -pred)
+
+ggplot (viz, aes(x = pred, y = value, color = model))+
+  geom_line() +
+  labs (x = 'Probability', y = '', title = 'Comparing Logit and Probit to LPM') +
+  theme_bw()
+
+```
+
+Lower and higher probabilities are different in LPM compared to logit & probit, but are hardly distinguishable in the mid range.
+Since logit and probit are nonlinear, coefficient is harder to interpret, as the slope of the function changes depending on the x. 
+
+
+
