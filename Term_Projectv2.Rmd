@@ -1,0 +1,101 @@
+---
+title: "Term Project"
+author: "Zsiros, Gabriella"
+date: "2022-12-11"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "")
+```
+
+```{r}
+library(tidyverse)
+library(modelsummary)
+library(data.table)
+```
+https://databank.worldbank.org/source/food-prices-for-nutrition/preview/on
+https://databank.worldbank.org/source/health-nutrition-and-population-statistics/preview/on
+https://databank.worldbank.org/indicator/SP.DYN.LE00.IN/1ff4a498/Popular-Indicators
+http://wdi.worldbank.org/table
+
+## Introduction 
+the first indicator i selected was the food price... (referred to as CoHD)
+Based on numerous datasets on the worldbank eventually i chose to examine the life expetancy at birth in the respective countries, to attempt to discover a relationship betwen how expensive it is to nourish healthy and how "healthy" those people are. The latter is of course not an easy indicator to measure, and surely can be more refined, but as first step, the explanatory variable will be the Life expectancy at birth (referred to as LEaB later on)
+
+## About the data:
+worldbank, chosen variables
+
+For the purpose of the analysis, the year 2020 is selected 
+```{r}
+#import
+health <- read.csv('health.csv')
+df_h <- health %>% filter(Year == 2020)
+foodprice <- read.csv('foodprice.csv')
+df_f <- foodprice %>% filter(Time == 2020)
+agriculture <- read.csv('agriculture.csv')
+df_a <- agriculture %>% filter(Time == 2017)
+fertility <- read.csv('fertility.csv')
+df_y <- fertility %>%  filter(Time == 2020)
+migration <- read.csv('migration.csv')
+df_m <- migration %>% filter(Time == 2017)
+```
+
+The core dataframe consist of the joining of the two tables, Food prices and Health. Table with smaller number of observations is kept as the base table. The main reason of the difference in `n` (number of observations) is that one of the data sources contained aggregated areas of countries, such as "Arab world" or "Euro Area".
+During the data cleaning the two analyzed columns were renamed for easier processing:
+* `"Cost.of.a.healthy.diet..CoHD."` as `CoHD`
+* `"Life.expectancy.at.birth..total..years...SP.DYN.LE00.IN."` as `LEaB`
+
+```{r}
+#joining tables, dropping duplicate columns
+df <- left_join(df_f, df_m)
+df_m <- select(df_m, -c('Time','Time.Code')) #,'Classification.Name','Classification.Code','Year.Code'))
+
+#remove unnecessary dataframes
+rm(list=setdiff(ls(), 'df'))
+
+#rename important columns
+df <- df %>%  rename("CoHD" = "Cost.of.a.healthy.diet..CoHD.",
+                     "Y" = "Fertility.rate..total..births.per.woman...SP.DYN.TFRT.IN.")
+
+
+```
+```{r}
+#converting to number
+df$CoHD <- as.numeric(df$Cost.of.a.healthy.diet..CoHD.)
+df$GDP <- as.numeric(df$GDP..PPP..current.international.....NY.GDP.MKTP.PP.CD.)
+df$Mig <- as.numeric(df$Net.migration..SM.POP.NETM.)
+#df$z <- as.numeric(df$Agriculture..forestry..and.fishing..value.added..constant.2015.US....NV.AGR.TOTL.KD.)
+
+df <- na.omit(df,CoHD,y,z)
+
+
+head(df,10)
+```
+
+
+### Check distribution
+
+
+```{r}
+datasummary_skim(df %>% select(Mig,GDP))
+```
+CoHD present a lognormal  distribution with longer right tail, LEaB is a distirbution between 53.7 and 85.4 
+
+Check  missing values
+
+Factor income
+
+Plot linear, lowess, quad?
+
+```{r}
+
+ggplot (df, aes(log(GDP),log(Mig))) +
+  geom_point() +
+  geom_smooth(method = loess)
+
+```
+
+
+Plot on income variables
