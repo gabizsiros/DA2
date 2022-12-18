@@ -30,16 +30,16 @@ worldbank, chosen variables
 For the purpose of the analysis, the year 2020 is selected 
 ```{r}
 #import
-health <- read.csv('health.csv')
-df_h <- health %>% filter(Year == 2020)
-foodprice <- read.csv('foodprice.csv')
-df_f <- foodprice %>% filter(Time == 2020)
-agriculture <- read.csv('agriculture.csv')
-df_a <- agriculture %>% filter(Time == 2017)
-fertility <- read.csv('fertility.csv')
-df_y <- fertility %>%  filter(Time == 2020)
-migration <- read.csv('migration.csv')
-df_m <- migration %>% filter(Time == 2017)
+df <- read.csv('https://raw.githubusercontent.com/gabizsiros/DA2/main/worldbank_pop.csv')
+df17 <- df %>% filter(Time == 2017)
+food <- read.csv('foodprice.csv')
+food <- food %>% filter(Time == 2017)
+
+food <- select(food, -c(Time.Code,Time))
+food$price <- as.numeric(food$Cost.of.a.healthy.diet..CoHD.)
+food$Time <- as.character(food$Time)
+df17 <- left_join(df17,food)
+
 ```
 
 The core dataframe consist of the joining of the two tables, Food prices and Health. Table with smaller number of observations is kept as the base table. The main reason of the difference in `n` (number of observations) is that one of the data sources contained aggregated areas of countries, such as "Arab world" or "Euro Area".
@@ -48,30 +48,36 @@ During the data cleaning the two analyzed columns were renamed for easier proces
 * `"Life.expectancy.at.birth..total..years...SP.DYN.LE00.IN."` as `LEaB`
 
 ```{r}
-#joining tables, dropping duplicate columns
-df <- left_join(df_f, df_m)
-df_m <- select(df_m, -c('Time','Time.Code')) #,'Classification.Name','Classification.Code','Year.Code'))
-
-#remove unnecessary dataframes
-rm(list=setdiff(ls(), 'df'))
-
 #rename important columns
-df <- df %>%  rename("CoHD" = "Cost.of.a.healthy.diet..CoHD.",
-                     "Y" = "Fertility.rate..total..births.per.woman...SP.DYN.TFRT.IN.")
+df17 <- df17 %>%  rename("GDPPC" = GDP.per.capita..constant.2015.US....NY.GDP.PCAP.KD.,
+                     "GDPPPP" = GDP.per.capita..PPP..constant.2017.international.....NY.GDP.PCAP.PP.KD.,
+                     "Migration" = Net.migration..SM.POP.NETM.,
+                     "LEaB" = Life.expectancy.at.birth..total..years...SP.DYN.LE00.IN.,,
+                     "Population" = Population..total..SP.POP.TOTL.,
+                     "HCI" = Human.capital.index..HCI...scale.0.1...HD.HCI.OVRL.)
 
 
 ```
+
+
+
 ```{r}
 #converting to number
-df$CoHD <- as.numeric(df$Cost.of.a.healthy.diet..CoHD.)
-df$GDP <- as.numeric(df$GDP..PPP..current.international.....NY.GDP.MKTP.PP.CD.)
-df$Mig <- as.numeric(df$Net.migration..SM.POP.NETM.)
-#df$z <- as.numeric(df$Agriculture..forestry..and.fishing..value.added..constant.2015.US....NV.AGR.TOTL.KD.)
+df17$Migration <- as.numeric(df17$Migration)
+df17$Population <- as.numeric(df17$Population)
+df17$GDPPC <- as.numeric(df17$GDPPC)
+df17$GDPPPP <-  as.numeric(df17$GDPPPP)
+df17$LEaB <- as.numeric(df17$LEaB)
+df17$HCI <- as.numeric(df17$HCI)
 
-df <- na.omit(df,CoHD,y,z)
+#dropping unnecessary columns
+df17 <- select(df17, -Time.Code) 
+
+#removing missing values
+df17 <- na.omit(df17, Migration,GDPPC,GDPPPP,LEaB)
 
 
-head(df,10)
+head(df17,10)
 ```
 
 
@@ -79,7 +85,7 @@ head(df,10)
 
 
 ```{r}
-datasummary_skim(df %>% select(Mig,GDP))
+datasummary_skim(df17)
 ```
 CoHD present a lognormal  distribution with longer right tail, LEaB is a distirbution between 53.7 and 85.4 
 
@@ -89,13 +95,66 @@ Factor income
 
 Plot linear, lowess, quad?
 
+
 ```{r}
 
-ggplot (df, aes(log(GDP),log(Mig))) +
+ggplot (df17, aes(GDPPC,Migration)) +
   geom_point() +
   geom_smooth(method = loess)
 
 ```
+```{r}
+ggplot (df17, aes(log(GDPPC),Migration/Population)) +
+  geom_point() +
+  geom_smooth(method = loess)
+```
+```{r}
+ggplot (df17, aes(log(GDPPC),Migration/Population)) +
+  stat_summary_bin()
+```
 
+
+```{r}
+#creating factor to distinguish if a coutry is target or origin
+df17$in_out <- as.factor(ifelse(df17$Migration >0,"In","Out"))
+df17in <- df17 %>%  filter(in_out == "In")
+df17out <- df17 %>%  filter(in_out == "Out")
+```
+
+
+```{r}
+ggplot()+
+  geom_point(data = df17in,aes(log(GDPPC),log(Migration)), color = 'green') +
+  geom_point(data = df17out,aes(log(GDPPC),log(abs(Migration))),color = 'red') + 
+  geom_smooth(data = df17in,aes(log(GDPPC),log(Migration)), color = 'green', method = 'lm') +
+  geom_smooth(data = df17out,aes(log(GDPPC),log(abs(Migration))),color = 'red',method = 'lm')
+             
+```
+
+```{r}
+ggplot (df17, aes(log(GDPPC),Migration)) +
+  geom_point() +
+  geom_smooth(method = lm)
+```
+```{r}
+ggplot (df17, aes(price/GDPPC,Migration/Population)) +
+  geom_point() +
+  geom_smooth(method = lm)
+```
+
+```{r}
+ggplot (df17, aes(GDPPC,log(Migration))) +
+  geom_point() +
+  geom_smooth(method = lm)
+```
+model1 
+```{r}
+model1 <- lm(Migration ~ GDPPC,df17)
+model2 <- lm(Migration ~log(GDPPC),df17)
+model3 <- lm(Migration/Population ~log(GDPPC),df17)
+
+modelsummary(list(model1,model2,model3))
+
+```
 
 Plot on income variables
