@@ -1,12 +1,15 @@
 ---
 title: "Term Project"
 author: "Zsiros, Gabriella"
-date: "2022-12-11"
+date: "2022-12-20"
 output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 knitr::opts_chunk$set(fig.pos = "H", out.extra = "")
 ```
 
@@ -14,59 +17,105 @@ knitr::opts_chunk$set(fig.pos = "H", out.extra = "")
 library(tidyverse)
 library(modelsummary)
 library(data.table)
+library(estimatr)
+library(lspline)
+library(kableExtra)
 ```
-https://databank.worldbank.org/source/food-prices-for-nutrition/preview/on
-https://databank.worldbank.org/source/health-nutrition-and-population-statistics/preview/on
-https://databank.worldbank.org/indicator/SP.DYN.LE00.IN/1ff4a498/Popular-Indicators
-http://wdi.worldbank.org/table
 
-## Introduction 
-the first indicator i selected was the food price... (referred to as CoHD)
-Based on numerous datasets on the worldbank eventually i chose to examine the life expetancy at birth in the respective countries, to attempt to discover a relationship betwen how expensive it is to nourish healthy and how "healthy" those people are. The latter is of course not an easy indicator to measure, and surely can be more refined, but as first step, the explanatory variable will be the Life expectancy at birth (referred to as LEaB later on)
+## Introduction
+
+As the purpose of my Analysis, I wanted to look at migration patterns of
+various economies over the world. The main source I used is part of the
+Worldbank Databank, where I selected some of the indicators I was
+interested in. Source:
+<https://databank.worldbank.org/indicator/SP.DYN.LE00.IN/1ff4a498/Popular-Indicators>
+
+Each observation represents a country, and I had several year's data at
+my disposal. As the main indicator is migration data, I wanted to find
+out if there is a relationship between migration numbers and "how well"
+county's economy is doing. Fo this purpose i chose one of the basic
+indicator of an economy: GDP per capita. In the next paragraphs I will
+introduce the dataset I specifically selected form Worldbank and will
+try to determine a relationship between the variables by running a
+linear regression.
 
 ## About the data:
-worldbank, chosen variables
 
-For the purpose of the analysis, the year 2020 is selected 
+The dependent variable (y) in question is migration, which is called
+'Net migration' as indicator. This "the number of immigrants minus the
+number of emigrants" that is observed during a five year period. This
+means that data of 2017 actually covers the period of 2012-2017; the
+data series before that, from 2007-2012.. etc. Considering the net
+migration data, it is an important conclusion that observations
+countries) with negative net migration value experience more residents
+moving from the country than moving into. Positive numbers mean the
+migration pattern just the other was around, with more people
+immigrating to a country than emigration from it.
+
+The independent variable in my dataset is GDP per Capita, in US dollar
+currency.
+
+Since the migration numbers are not really conclusive in themselves, it
+its important to consider the Population of the country as well.
+
+Aside from these variables above, and the country names, I have included
+Life expectancy at birth and Human Capital index in the dataset. Life
+expectancy in this context means *"Life expectancy at birth indicates
+the number of years a newborn infant would live if prevailing patterns
+of mortality at the time of its birth were to stay the same throughout
+its life."* while Human Capital index (HCI) is a calculated value
+between 0 and 1 which indicates the contributions of health and
+education to worker productivity.
+
+To make the indicators easier to interpret, I have introduced the
+following naming conventions:
+
+-   GDP per Capita is denoted as `GDPPC`
+
+-   Life expectancy at birth denoted as `LEaB`
+
+-   Human Capital Index as `HCI`
+
+-   Migration with regards to the population is added as a new
+    calculated variable and denoted as `Mig_rate`
+
+For the purpose of the analysis, I selected only **one period of time:**
+`2017`.
+
 ```{r}
-#import
+#import dataset from csv
 df <- read.csv('https://raw.githubusercontent.com/gabizsiros/DA2/main/worldbank_pop.csv')
+#selecting analyzed time section
 df17 <- df %>% filter(Time == 2017)
-food <- read.csv('foodprice.csv')
-food <- food %>% filter(Time == 2017)
-
-food <- select(food, -c(Time.Code,Time))
-food$price <- as.numeric(food$Cost.of.a.healthy.diet..CoHD.)
-food$Time <- as.character(food$Time)
-df17 <- left_join(df17,food)
+#df12 <- df %>% filter(Time == 2012)
 
 ```
 
-The core dataframe consist of the joining of the two tables, Food prices and Health. Table with smaller number of observations is kept as the base table. The main reason of the difference in `n` (number of observations) is that one of the data sources contained aggregated areas of countries, such as "Arab world" or "Euro Area".
-During the data cleaning the two analyzed columns were renamed for easier processing:
-* `"Cost.of.a.healthy.diet..CoHD."` as `CoHD`
-* `"Life.expectancy.at.birth..total..years...SP.DYN.LE00.IN."` as `LEaB`
-
 ```{r}
-#rename important columns
+#rename important columns for readability 
 df17 <- df17 %>%  rename("GDPPC" = GDP.per.capita..constant.2015.US....NY.GDP.PCAP.KD.,
-                     "GDPPPP" = GDP.per.capita..PPP..constant.2017.international.....NY.GDP.PCAP.PP.KD.,
                      "Migration" = Net.migration..SM.POP.NETM.,
                      "LEaB" = Life.expectancy.at.birth..total..years...SP.DYN.LE00.IN.,,
                      "Population" = Population..total..SP.POP.TOTL.,
                      "HCI" = Human.capital.index..HCI...scale.0.1...HD.HCI.OVRL.)
 
 
+
 ```
 
+## Models
 
+Concentrating on the renamed and relevant columns, I have decided to
+remove the missing variables and keep extreme values. I have also added
+a calculated column of Migration numbers divided by population, thus
+creation a net migration ratio, which fares better with the intended
+independent variable, `GDPPC`.
 
 ```{r}
 #converting to number
 df17$Migration <- as.numeric(df17$Migration)
 df17$Population <- as.numeric(df17$Population)
 df17$GDPPC <- as.numeric(df17$GDPPC)
-df17$GDPPPP <-  as.numeric(df17$GDPPPP)
 df17$LEaB <- as.numeric(df17$LEaB)
 df17$HCI <- as.numeric(df17$HCI)
 
@@ -76,85 +125,175 @@ df17 <- select(df17, -Time.Code)
 #removing missing values
 df17 <- na.omit(df17, Migration,GDPPC,GDPPPP,LEaB)
 
+#introducing migration rate
+df17$Mig_rate <- df17$Migration / df17$Population
 
-head(df17,10)
+
 ```
 
-
-### Check distribution
-
+An overview of the data shows the `GDPPC` having a log-normal or
+possibly pareto distribution, with a long right tail.
 
 ```{r}
-datasummary_skim(df17)
+#overview of data
+datasummary_skim(df17, output = 'kableExtra', title = "Statistucal features of the dataset") %>% kable_styling(latex_options = "scale_down") %>% kable_styling(latex_options = "HOLD_position")
+
 ```
-CoHD present a lognormal  distribution with longer right tail, LEaB is a distirbution between 53.7 and 85.4 
 
-Check  missing values
+### Lowess
 
-Factor income
+Comparing several models and plotting the dependent and independent
+variables, a sensible choice was to take the logarithmic value of the
+`GDPPC` (x) as the change/increase is better represented by approximate
+percentages, rather than actual dollar values. With level x, the
+observations are clustered around relatively small numbers. Following
+the curve of the lowess model with level variables, the slope of the
+curve intuitively changes at specific values the x is taking, namely
+5000 and 25000 \$ GDP per capita which will be used late on as nodes in
+a spline transformation in the analysis. *(see table in appendix)*
 
-Plot linear, lowess, quad?
 
+Taking a logarithmic value of the dependent variable (y) is not
+preferred here, as the Net Migration rate takes on values that are not
+positive as well.
+
+After a log transformation of the x, Locally Weighted Scatterplot
+smoothing (LOWESS) seems to capture a good curved fit, which is depicted
+by default with a 95% percent confidence interval. Standard error is
+visibly better where we have more data, where x takes on small values
+and increases as the datapoint become more scarce.
+
+### Linear models
+
+After comparing more linear models the best fit probed to be the Spline
+model with nodes at 5000,25000 and 45000 respectively.
+
+```{r}
+model1 <-  lm(Mig_rate ~ lspline(GDPPC,c(5000,25000,45000)), df17)
+
+modelsummary(model1, shape = model + statistic ~ term, coef_rename = 
+               c('lspline(GDPPC, c(5000, 25000, 45000))1' = '<5k',
+             'lspline(GDPPC, c(5000, 25000, 45000))2' = '>5k,<25k', 
+             'lspline(GDPPC, c(5000, 25000, 45000))3' = '>25k,<45k',
+             'lspline(GDPPC, c(5000, 25000, 45000))4' = '>45k'),
+             gof_omit = "IC|Log|F|RMSE",vcov = 'HC3', 
+             output = 'kableExtra', title = 'Spline model') %>% 
+  kable_styling(latex_options = "scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+The intercept shows that the Net migration rate where the x takes on the
+value of 0 is -0.005 (meaning 0.5% of the population emigrates from the
+origin country). However, since the GDP per capita's minimum value is
+286.4, this information has little relevance. Under 5000, the slope
+coefficient has a value of - 0.000001, as the GDP per capita increases
+by 1 unit (dollar), the net migration rate decreases by 0.000001% (as
+the net migration is already denoted in percentage). This can also be
+expressed by 0.01% change for every 10 thousand dollar increase in GDP.
+After 5000, the slope changes however, a 0.000002% increase in Net
+migration rate until 25000 then 0.0000005 decrease (almost a flat line,
+this is one decimal lower than the other coefficients), and finally a
+0.0000008 increase. Also can be interpreted as 0.01% decrease, 0.02%
+increase, 0.005% decrease, then 0.08 increase by every 10 thousand
+dollars increase in the countries GDP per Capita
+
+
+```{r,fig.height = 5}
+#spline plot
+ggplot (df17, aes(GDPPC,Mig_rate)) +
+  geom_point() +
+  geom_smooth(method='lm',formula =  y ~ lspline(x,c(0,5000,25000,45000,max(df17$GDPPC)))) + 
+  labs (x = 'GPD per Capita', y = 'Net migration rate', title = 'Spline') +
+  scale_x_continuous(breaks = c(0,5000,25000,45000,max(df17$GDPPC))) +
+  xlim(0,45000) +
+  theme_bw()
+
+```
+
+## Alternatives
+
+As alternative models, I have analyzed two alternative models: one not
+transformation the variables, only considering the Migration as ratio,
+while the other took the logarithmic value of GDP per capita. Using
+robust standard errors, both the R^2^ and adjusted R^2^ supports the
+original Spline.
+
+The second model (level-level) shows a 0.0000006 increase in net
+migration rate by increasing the GDP Per capita on average, while the
+third model (level-log) shows a 0.00007increase in the migration rate
+when the GDP per capita is increased by 1%.
+
+```{r}
+model1 <-  lm(Mig_rate ~ lspline(GDPPC,c(5000,25000,45000)), df17)
+model2 <- lm(Mig_rate ~ GDPPC,df17)
+model3 <- lm(Mig_rate ~log(GDPPC),df17)
+
+
+modelsummary(list(model1,model2,model3), 
+             coef_rename = 
+               c('lspline(GDPPC, c(5000, 25000, 45000))1' = '<5k',
+             'lspline(GDPPC, c(5000, 25000, 45000))2' = '>5k,<25k', 
+             'lspline(GDPPC, c(5000, 25000, 45000))3' = '>25k,<45k',
+             'lspline(GDPPC, c(5000, 25000, 45000))4' = '>45k'),
+             gof_omit = "IC|Log|F|RMSE",vcov = 'HC3', output = 'kableExtra', title = "Model comparison")  %>% kable_styling(latex_options = "HOLD_position")
+#  kable_styling(latex_options = "scale_down")
+
+```
+
+### Multivariate regression
+
+Using additional variable such as life Expectancy at Birth and Human Capital Index introduces more granularity to the data. Taking the nominal value of GDP per capita, the model shows that in countires with the same GDP per capita level, the migration increases be 0.0005% with a higher life expectancy, while the rate decreases by 0.042% the the HCI is increased and all aohter variables remain the same.
 
 ```{r}
 
+model4 <- lm(Mig_rate ~ GDPPC + LEaB + HCI,df17)
+
+
+modelsummary(model4, shape = model + statistic ~ term, gof_omit = "IC|Log|F|RMSE",vcov = 'HC3', output = 'kableExtra', title = "Multivariate model")  %>%
+ kable_styling(latex_options = "HOLD_position")
+
+```
+
+## Summary and conclusion
+
+The regression of the dataset could be captured with various methods, of which the spline model proved to be the most accurate. Depending on the the GDP per capita range, the change in net migration rate varies, at some point more significant than others, hence the fit of the spline model. 
+Introducing more variable from the several indicator available at WorldBank, we can introduce some granularity which opens to topic for further discussions on what makes a country a migration target, on top the the GDP economic indicator. 
+
+## Appendix
+
+### Level-level plot with lowess
+```{r, fig.height = 4}
 ggplot (df17, aes(GDPPC,Migration)) +
   geom_point() +
-  geom_smooth(method = loess)
-
+  geom_smooth(method = loess) +
+  labs (x = 'GPD per Capita', y = 'Net migration rate', title = 'Level-Level LOWESS') +
+  theme_bw() 
 ```
-```{r}
-ggplot (df17, aes(log(GDPPC),Migration/Population)) +
+
+### Level-Log plot
+```{r, fig.height = 3}
+plot1 <- ggplot (df17, aes(log(GDPPC),Mig_rate), color = method) +
   geom_point() +
-  geom_smooth(method = loess)
-```
-```{r}
-ggplot (df17, aes(log(GDPPC),Migration/Population)) +
-  stat_summary_bin()
-```
+  geom_smooth(method = lm, color = 'blue') + 
+  labs (x = 'ln(GPD per Capita)', y = 'Net migration rate', title = 'Level-Log') +
+  theme_bw() 
 
-
-```{r}
-#creating factor to distinguish if a coutry is target or origin
-df17$in_out <- as.factor(ifelse(df17$Migration >0,"In","Out"))
-df17in <- df17 %>%  filter(in_out == "In")
-df17out <- df17 %>%  filter(in_out == "Out")
+plot1 + theme(plot.title = element_text(hjust = 0.5))
 ```
 
-
-```{r}
-ggplot()+
-  geom_point(data = df17in,aes(log(GDPPC),log(Migration)), color = 'green') +
-  geom_point(data = df17out,aes(log(GDPPC),log(abs(Migration))),color = 'red') + 
-  geom_smooth(data = df17in,aes(log(GDPPC),log(Migration)), color = 'green', method = 'lm') +
-  geom_smooth(data = df17out,aes(log(GDPPC),log(abs(Migration))),color = 'red',method = 'lm')
-             
-```
-
-```{r}
-ggplot (df17, aes(log(GDPPC),Migration)) +
+### Level-level plot
+```{r, fig.height = 4}
+ggplot (df17, aes(GDPPC,Migration)) +
   geom_point() +
-  geom_smooth(method = lm)
+  geom_smooth(method = lm) +
+  labs (x = 'GPD per Capita', y = 'Net migration rate', title = 'Level-Level') +
+  theme_bw() 
 ```
+
+
+
+### Datatable
 ```{r}
-ggplot (df17, aes(price/GDPPC,Migration/Population)) +
-  geom_point() +
-  geom_smooth(method = lm)
+head(df17 %>% select(Country.Name,Migration,Population,GDPPC, LEaB,HCI),20)
 ```
-
-```{r}
-ggplot (df17, aes(GDPPC,log(Migration))) +
-  geom_point() +
-  geom_smooth(method = lm)
-```
-model1 
-```{r}
-model1 <- lm(Migration ~ GDPPC,df17)
-model2 <- lm(Migration ~log(GDPPC),df17)
-model3 <- lm(Migration/Population ~log(GDPPC),df17)
-
-modelsummary(list(model1,model2,model3))
-
-```
-
-Plot on income variables
